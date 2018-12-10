@@ -1,0 +1,6 @@
+{
+    "sketch": "romi32u4_ros.ino",
+    "board": "arduino:avr:leonardo",
+    "output": "./.build",
+    "port": "COM7"
+}
