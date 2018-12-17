@@ -1,3 +1,5 @@
+#define USE_USBCON
+
 #include <PID_v1.h>
 #include <Romi32U4.h>
 #include <ros.h>
@@ -6,13 +8,15 @@
 #define ENC_COUNTS_PER_REV 1437.09
 #define WHEEL_DIAMETER_M 0.07
 #define WHEEL_CIRCUMFERENCE_M WHEEL_DIAMETER_M * PI
+#define WHEEL_TO_WHEEL_DISTANCE_M 0.149
 
 #define MAX_WHEEL_VELOCITY 0.75
+#define MAX_ANGULAR_VELOCITY 10.0
 
 // PID Constants
 const double kP = 1.5;
-const double kI = 0;
-const double kD = 0;
+const double kI = 0.0;
+const double kD = 0.0;
 
 Romi32U4Motors motors;
 Romi32U4Encoders encoders;
@@ -37,8 +41,26 @@ double rightOutput = 0.0;
 PID leftPid(&leftInput, &leftOutput, &leftSetpoint, kP, kI, kD, DIRECT);
 PID rightPid(&rightInput, &rightOutput, &rightSetpoint, kP, kI, kD, DIRECT);
 
+bool scaleOutput = false;
+
 void cmdvelCb(const geometry_msgs::Twist& cmdvelMsg) {
-    nh.loginfo("message received");
+    double linear = cmdvelMsg.linear.x;
+    double angular = cmdvelMsg.angular.z;
+
+    linear = constrain(linear, -MAX_WHEEL_VELOCITY, MAX_WHEEL_VELOCITY);
+    angular = constrain(angular, -MAX_ANGULAR_VELOCITY, MAX_ANGULAR_VELOCITY);
+
+    double leftVel = linear - (angular * WHEEL_TO_WHEEL_DISTANCE_M / 2.0);
+    double rightVel = linear + (angular * WHEEL_TO_WHEEL_DISTANCE_M / 2.0);
+
+    if (max(abs(leftVel), abs(rightVel)) > MAX_WHEEL_VELOCITY) {
+        double factor = MAX_WHEEL_VELOCITY / max(abs(leftVel), abs(rightVel));
+        leftVel *= factor;
+        rightVel *= factor;
+    }
+
+    leftSetpoint = constrain(leftVel, -MAX_WHEEL_VELOCITY, MAX_WHEEL_VELOCITY);
+    rightSetpoint = constrain(rightVel, -MAX_WHEEL_VELOCITY, MAX_WHEEL_VELOCITY);
 }
 
 ros::Subscriber<geometry_msgs::Twist> cmdvelSub("cmd_vel", &cmdvelCb);
@@ -55,6 +77,7 @@ double distToVelocity(double distanceM, long timeDeltaMs) {
 void setup()
 {
     nh.initNode();
+
     nh.subscribe(cmdvelSub);
     lastReadingTime = millis();
 
@@ -112,16 +135,7 @@ void loop()
         if (rightMotorOutput > 300) rightMotorOutput = 300;
         if (rightMotorOutput < -300) rightMotorOutput = -300;
 
-        Serial.print("lSet: ");
-        Serial.print(leftSetpoint);
-        Serial.print(" lIn: ");
-        Serial.print(leftInput);
-        Serial.print(" lOut: ");
-        Serial.print(leftOutput);
-        Serial.print(" lMotorOut: ");
-        Serial.println(leftMotorOutput);
-
-        motors.setSpeeds(leftMotorOutput, 0);
+        motors.setSpeeds(leftMotorOutput, rightMotorOutput);
     }
 
     leftPid.Compute();
